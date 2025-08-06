@@ -250,28 +250,39 @@ def commit_and_push(repo_path: Path, create_tag: str | None = None) -> None:
 
     # Push to remote
     print("\n📤 Pushing to test repository...")
-    push_result = run_command(["git", "push"], cwd=repo_path, check=False)
+    
+    # Check current branch
+    branch_result = run_command(["git", "branch", "--show-current"], cwd=repo_path, silent=True)
+    current_branch = branch_result.stdout.strip() or "main"
+    
+    # Try regular push first, if it fails try with --set-upstream
+    push_result = run_command(["git", "push"], cwd=repo_path, check=False, silent=True)
+    if push_result.returncode != 0:
+        if "no upstream branch" in push_result.stderr.lower():
+            print(f"Setting upstream branch and pushing...")
+            push_result = run_command(["git", "push", "-u", "origin", current_branch], cwd=repo_path, check=False)
+        else:
+            # Show the error if it's not an upstream issue
+            push_result = run_command(["git", "push"], cwd=repo_path, check=False)
+    
     if push_result.returncode != 0:
         if "repository not found" in push_result.stderr.lower() or "could not read from remote" in push_result.stderr.lower():
-            print("⚠️  Test repository 'memo-demo-test' doesn't exist yet.")
-            print("\nTo create it:")
-            print("  1. Go to https://github.com/new")
-            print("  2. Create repository named 'memo-demo-test'")
-            print("  3. Run: cd", repo_path)
-            print("  4. Run: git push -u origin main")
+            print("❌ Test repository 'memo-demo-test' doesn't exist on GitHub.")
+            print("Please create it at: https://github.com/new")
         else:
             print(f"❌ Push failed: {push_result.stderr}")
+            sys.exit(1)
     else:
         print("✅ Successfully pushed to test repository!")
-
-    # Push tag if created
-    if create_tag and push_result.returncode == 0:
-        print(f"Pushing tag {create_tag}...")
-        tag_push_result = run_command(["git", "push", "origin", create_tag], cwd=repo_path, check=False)
-        if tag_push_result.returncode != 0:
-            print(f"⚠️  Tag push failed: {tag_push_result.stderr}")
-        else:
-            print(f"✅ Tag {create_tag} pushed")
+        
+        # Push tag if created
+        if create_tag:
+            print(f"Pushing tag {create_tag}...")
+            tag_push_result = run_command(["git", "push", "origin", create_tag], cwd=repo_path, check=False)
+            if tag_push_result.returncode != 0:
+                print(f"⚠️  Tag push failed: {tag_push_result.stderr}")
+            else:
+                print(f"✅ Tag {create_tag} pushed")
 
 
 def main():
@@ -359,11 +370,8 @@ def main():
     commit_and_push(target_path, create_tag)
 
     print("\n✅ Development deployment completed!")
-    print(f"📁 Test repository prepared at: {target_path}")
-    print("\nNext steps:")
-    print("  1. Create 'memo-demo-test' repository on GitHub if needed")
-    print("  2. Enable GitHub Pages on the test repository")
-    print("  3. Test the cmd-/ functionality on the deployed site")
+    print(f"📁 Test repository at: {target_path}")
+    print(f"🌐 View at: https://daeh.github.io/memo-demo-test/")
 
 
 if __name__ == "__main__":
