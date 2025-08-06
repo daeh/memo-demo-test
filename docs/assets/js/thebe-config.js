@@ -58,10 +58,26 @@
 
 
   // ---------- BOOTSTRAP & INITIALIZATION ----------
+  async function waitForCodeMirror(maxAttempts = 50, interval = 100) {
+    console.log('⏳ Waiting for CodeMirror to be available...');
+    
+    for (let i = 0; i < maxAttempts; i++) {
+      if (window.CodeMirror) {
+        console.log('✅ CodeMirror is now available');
+        return true;
+      }
+      await new Promise(resolve => setTimeout(resolve, interval));
+    }
+    
+    console.warn('⚠️ Timeout waiting for CodeMirror');
+    return false;
+  }
+  
   async function loadCodeMirrorCommentAddon() {
-    // Only load if CodeMirror is available
-    if (!window.CodeMirror) {
-      console.warn('CodeMirror not available yet, skipping comment addon');
+    // Wait for CodeMirror to be available
+    const cmAvailable = await waitForCodeMirror();
+    if (!cmAvailable) {
+      console.error('Cannot load comment addon - CodeMirror not available');
       return false;
     }
     
@@ -118,12 +134,14 @@
       // Store the thebe instance globally
       window.thebeInstance = thebe;
       
-      // Now that Thebe is loaded, CodeMirror should be available
-      // Load the comment addon
-      await loadCodeMirrorCommentAddon();
-      
-      // Set up comment toggle for existing and future CodeMirror instances
-      setupCodeMirrorCommentToggle();
+      // Start the comment addon loading process asynchronously
+      // (don't wait for it, as CodeMirror might not be available yet)
+      loadCodeMirrorCommentAddon().then((success) => {
+        if (success) {
+          // Set up comment toggle for existing and future CodeMirror instances
+          setupCodeMirrorCommentToggle();
+        }
+      });
       
       // Mount status widget if configured
       if (thebeConfig.mountStatusWidget) {
@@ -700,10 +718,10 @@
   }
   
   function setupCodeMirrorCommentToggle() {
-    // Wait a bit for CodeMirror instances to be created
-    setTimeout(() => {
-      configureAllCodeMirrorInstances();
-    }, 1000);
+    console.log('🔧 Setting up CodeMirror comment toggle...');
+    
+    // Configure all existing instances immediately
+    configureAllCodeMirrorInstances();
     
     // Also set up observer for future CodeMirror instances
     const observer = new MutationObserver((mutations) => {
@@ -712,9 +730,13 @@
           if (node.nodeType === Node.ELEMENT_NODE) {
             // Check if this is or contains a CodeMirror element
             if (node.classList?.contains('CodeMirror')) {
-              configureCodeMirrorInstance(node);
+              // Small delay to ensure the instance is fully initialized
+              setTimeout(() => configureCodeMirrorInstance(node), 100);
             } else if (node.querySelectorAll) {
-              node.querySelectorAll('.CodeMirror').forEach(configureCodeMirrorInstance);
+              const editors = node.querySelectorAll('.CodeMirror');
+              editors.forEach(editor => {
+                setTimeout(() => configureCodeMirrorInstance(editor), 100);
+              });
             }
           }
         });
@@ -725,6 +747,11 @@
       childList: true,
       subtree: true
     });
+    
+    // Also configure after a delay to catch any editors that were created during initialization
+    setTimeout(() => {
+      configureAllCodeMirrorInstances();
+    }, 2000);
   }
   
   function configureAllCodeMirrorInstances() {
