@@ -1127,4 +1127,398 @@
       editors: editors.length
     };
   };
+
+  // Enhanced debugging utilities
+  window.debugCommentToggle = {
+    // Check environment
+    checkEnvironment() {
+      console.log('🔍 Environment Debug Info:');
+      console.log('  CodeMirror:', !!window.CodeMirror);
+      console.log('  Thebe:', !!window.thebe);
+      console.log('  ThebeInstance:', !!window.thebeInstance);
+      console.log('  Comment Addon:', !!(window.CodeMirror?.commands?.toggleComment));
+      console.log('  Page URL:', window.location.href);
+      console.log('  User Agent:', navigator.userAgent);
+      
+      const configScript = document.querySelector('script[type="text/x-thebe-config"]');
+      if (configScript) {
+        try {
+          const config = JSON.parse(configScript.textContent);
+          console.log('  Thebe Config extraKeys:', config.codeMirrorConfig?.extraKeys);
+        } catch (e) {
+          console.error('  Failed to parse Thebe config:', e);
+        }
+      }
+      
+      return {
+        codeMirror: !!window.CodeMirror,
+        thebe: !!window.thebe,
+        thebeInstance: !!window.thebeInstance,
+        commentAddon: !!(window.CodeMirror?.commands?.toggleComment),
+        url: window.location.href
+      };
+    },
+    
+    // Check all instances
+    checkInstances() {
+      console.log('🔍 Instance Debug Info:');
+      const editors = document.querySelectorAll('.CodeMirror');
+      console.log(`  Total instances: ${editors.length}`);
+      
+      const instanceData = [];
+      editors.forEach((element, index) => {
+        if (element.CodeMirror) {
+          const cm = element.CodeMirror;
+          const extraKeys = cm.getOption('extraKeys') || {};
+          const configured = element.dataset.commentToggleConfigured === 'true';
+          
+          const data = {
+            index: index + 1,
+            configured,
+            'Cmd-/': extraKeys['Cmd-/'] || 'not set',
+            'Ctrl-/': extraKeys['Ctrl-/'] || 'not set',
+            mode: cm.getOption('mode'),
+            theme: cm.getOption('theme')
+          };
+          
+          instanceData.push(data);
+          console.log(`  Instance ${index + 1}:`);
+          console.log(`    Configured: ${configured}`);
+          console.log(`    Cmd-/: ${extraKeys['Cmd-/']}`);
+          console.log(`    Ctrl-/: ${extraKeys['Ctrl-/']}`);
+        }
+      });
+      
+      if (instanceData.length > 0) {
+        console.table(instanceData);
+      }
+      
+      return instanceData;
+    },
+    
+    // Force reconfiguration
+    forceReconfigure() {
+      console.log('🔧 Forcing reconfiguration of all instances...');
+      
+      // First ensure addon is loaded
+      if (!window.CodeMirror?.commands?.toggleComment) {
+        console.log('⏳ Loading comment addon first...');
+        loadCodeMirrorCommentAddon().then(() => {
+          console.log('✅ Addon loaded, configuring instances...');
+          configureAllCodeMirrorInstances();
+        });
+      } else {
+        configureAllCodeMirrorInstances();
+      }
+      
+      const result = this.checkInstances();
+      return result;
+    },
+    
+    // Test comment functionality
+    testComment(instanceIndex = 0) {
+      const editors = document.querySelectorAll('.CodeMirror');
+      if (instanceIndex >= editors.length) {
+        console.error(`❌ Instance ${instanceIndex} not found (only ${editors.length} available)`);
+        return false;
+      }
+      
+      const element = editors[instanceIndex];
+      if (!element.CodeMirror) {
+        console.error(`❌ Instance ${instanceIndex} does not have CodeMirror`);
+        return false;
+      }
+      
+      const cm = element.CodeMirror;
+      const original = cm.getValue();
+      
+      console.log(`🧪 Testing comment on instance ${instanceIndex}...`);
+      
+      try {
+        // Test single line
+        cm.setValue('print("Hello World")');
+        cm.setCursor(0, 0);
+        console.log('Before toggle:', cm.getValue());
+        
+        window.CodeMirror.commands.toggleComment(cm);
+        const commented = cm.getValue();
+        console.log('After adding comment:', commented);
+        
+        window.CodeMirror.commands.toggleComment(cm);
+        const uncommented = cm.getValue();
+        console.log('After removing comment:', uncommented);
+        
+        // Test multi-line
+        cm.setValue('def hello():\n    print("Hello")\n    return True');
+        cm.setSelection({line: 0, ch: 0}, {line: 2, ch: 15});
+        
+        window.CodeMirror.commands.toggleComment(cm);
+        const multiCommented = cm.getValue();
+        console.log('Multi-line commented:', multiCommented);
+        
+        // Restore original
+        cm.setValue(original);
+        
+        const success = commented.includes('#') && !uncommented.includes('#');
+        console.log(success ? '✅ Comment toggle working!' : '❌ Comment toggle failed');
+        return success;
+      } catch (error) {
+        console.error('❌ Error during test:', error);
+        cm.setValue(original);
+        return false;
+      }
+    },
+    
+    // Monitor for new instances
+    monitorNewInstances(duration = 10000) {
+      console.log(`👁️ Monitoring for new CodeMirror instances for ${duration/1000} seconds...`);
+      
+      let instanceCount = document.querySelectorAll('.CodeMirror').length;
+      console.log(`Starting with ${instanceCount} instances`);
+      
+      const interval = setInterval(() => {
+        const newCount = document.querySelectorAll('.CodeMirror').length;
+        if (newCount > instanceCount) {
+          console.log(`🆕 New instances detected! ${instanceCount} → ${newCount}`);
+          instanceCount = newCount;
+          
+          // Configure new instances
+          setTimeout(() => {
+            configureAllCodeMirrorInstances();
+            this.checkInstances();
+          }, 100);
+        }
+      }, 500);
+      
+      setTimeout(() => {
+        clearInterval(interval);
+        console.log('👁️ Monitoring stopped');
+      }, duration);
+      
+      return interval;
+    }
+  };
+
+  // Comprehensive test suite
+  class CommentToggleTestSuite {
+    constructor() {
+      this.results = {
+        total: 0,
+        passed: 0,
+        failed: 0,
+        tests: []
+      };
+    }
+    
+    async runAllTests() {
+      console.log('🧪 Starting Comprehensive Comment Toggle Test Suite...');
+      console.log('=' .repeat(50));
+      
+      await this.testEnvironment();
+      await this.testConfiguration();
+      await this.testFunctionality();
+      await this.testKeyboardShortcuts();
+      
+      this.printSummary();
+      return this.results;
+    }
+    
+    test(name, testFunction) {
+      this.results.total++;
+      console.log(`🧪 Running: ${name}`);
+      
+      try {
+        const result = testFunction();
+        if (result) {
+          this.results.passed++;
+          this.results.tests.push({ name, status: 'PASS' });
+          console.log(`  ✅ PASS`);
+        } else {
+          this.results.failed++;
+          this.results.tests.push({ name, status: 'FAIL' });
+          console.log(`  ❌ FAIL`);
+        }
+      } catch (error) {
+        this.results.failed++;
+        this.results.tests.push({ name, status: 'ERROR', error: error.message });
+        console.log(`  💥 ERROR: ${error.message}`);
+      }
+    }
+    
+    async testEnvironment() {
+      console.log('\n📋 Environment Tests:');
+      
+      this.test('CodeMirror is loaded', () => {
+        return !!window.CodeMirror;
+      });
+      
+      this.test('Comment addon is loaded', () => {
+        return !!(window.CodeMirror?.commands?.toggleComment);
+      });
+      
+      this.test('At least one CodeMirror instance exists', () => {
+        return document.querySelectorAll('.CodeMirror').length > 0;
+      });
+      
+      this.test('Thebe configuration exists', () => {
+        return !!document.querySelector('script[type="text/x-thebe-config"]');
+      });
+      
+      this.test('Thebe config includes extraKeys', () => {
+        const configScript = document.querySelector('script[type="text/x-thebe-config"]');
+        if (!configScript) return false;
+        
+        try {
+          const config = JSON.parse(configScript.textContent);
+          const extraKeys = config.codeMirrorConfig?.extraKeys;
+          return !!(extraKeys && extraKeys['Cmd-/'] && extraKeys['Ctrl-/']);
+        } catch (e) {
+          return false;
+        }
+      });
+    }
+    
+    async testConfiguration() {
+      console.log('\n⚙️ Configuration Tests:');
+      
+      this.test('At least one instance has comment shortcuts', () => {
+        const editors = document.querySelectorAll('.CodeMirror');
+        if (editors.length === 0) return false;
+        
+        for (const element of editors) {
+          if (element.CodeMirror) {
+            const extraKeys = element.CodeMirror.getOption('extraKeys') || {};
+            if (extraKeys['Cmd-/'] === 'toggleComment' && extraKeys['Ctrl-/'] === 'toggleComment') {
+              return true;
+            }
+          }
+        }
+        return false;
+      });
+      
+      this.test('All instances marked as configured', () => {
+        const editors = document.querySelectorAll('.CodeMirror');
+        if (editors.length === 0) return false;
+        
+        const configuredElements = document.querySelectorAll('.CodeMirror[data-comment-toggle-configured="true"]');
+        return configuredElements.length === editors.length;
+      });
+    }
+    
+    async testFunctionality() {
+      console.log('\n🔧 Functionality Tests:');
+      
+      this.test('toggleComment function exists', () => {
+        return typeof window.CodeMirror?.commands?.toggleComment === 'function';
+      });
+      
+      this.test('Comment toggle works on test content', () => {
+        const editor = document.querySelector('.CodeMirror');
+        if (!editor?.CodeMirror) return false;
+        
+        const cm = editor.CodeMirror;
+        const original = cm.getValue();
+        
+        try {
+          cm.setValue('test line');
+          cm.setCursor(0, 0);
+          
+          window.CodeMirror.commands.toggleComment(cm);
+          const commented = cm.getValue();
+          
+          window.CodeMirror.commands.toggleComment(cm);
+          const uncommented = cm.getValue();
+          
+          cm.setValue(original);
+          
+          return commented.includes('#') && !uncommented.includes('#');
+        } catch (error) {
+          cm.setValue(original);
+          return false;
+        }
+      });
+      
+      this.test('Multi-line comment toggle works', () => {
+        const editor = document.querySelector('.CodeMirror');
+        if (!editor?.CodeMirror) return false;
+        
+        const cm = editor.CodeMirror;
+        const original = cm.getValue();
+        
+        try {
+          cm.setValue('line1\nline2\nline3');
+          cm.setSelection({line: 0, ch: 0}, {line: 2, ch: 5});
+          
+          window.CodeMirror.commands.toggleComment(cm);
+          const commented = cm.getValue();
+          
+          const lines = commented.split('\n');
+          const allCommented = lines.every(line => line.startsWith('#') || line.trim() === '');
+          
+          cm.setValue(original);
+          return allCommented;
+        } catch (error) {
+          cm.setValue(original);
+          return false;
+        }
+      });
+    }
+    
+    async testKeyboardShortcuts() {
+      console.log('\n⌨️ Keyboard Shortcut Tests:');
+      
+      this.test('Cmd-/ shortcut is mapped', () => {
+        const editor = document.querySelector('.CodeMirror');
+        if (!editor?.CodeMirror) return false;
+        
+        const extraKeys = editor.CodeMirror.getOption('extraKeys') || {};
+        return extraKeys['Cmd-/'] === 'toggleComment';
+      });
+      
+      this.test('Ctrl-/ shortcut is mapped', () => {
+        const editor = document.querySelector('.CodeMirror');
+        if (!editor?.CodeMirror) return false;
+        
+        const extraKeys = editor.CodeMirror.getOption('extraKeys') || {};
+        return extraKeys['Ctrl-/'] === 'toggleComment';
+      });
+    }
+    
+    printSummary() {
+      console.log('\n' + '=' .repeat(50));
+      console.log('📊 Test Results Summary:');
+      console.log(`  Total Tests: ${this.results.total}`);
+      console.log(`  Passed: ${this.results.passed} ✅`);
+      console.log(`  Failed: ${this.results.failed} ❌`);
+      console.log(`  Success Rate: ${Math.round((this.results.passed / this.results.total) * 100)}%`);
+      
+      if (this.results.failed > 0) {
+        console.log('\n❌ Failed Tests:');
+        this.results.tests.filter(t => t.status !== 'PASS').forEach(test => {
+          console.log(`  - ${test.name}${test.error ? ': ' + test.error : ''}`);
+        });
+      }
+      
+      console.log('=' .repeat(50));
+    }
+  }
+  
+  // Export test suite
+  window.runCommentToggleTests = async function() {
+    const testSuite = new CommentToggleTestSuite();
+    return await testSuite.runAllTests();
+  };
+  
+  // Quick test function
+  window.quickCommentTest = function() {
+    console.log('🚀 Quick Comment Test');
+    console.log('1. Checking environment...');
+    window.debugCommentToggle.checkEnvironment();
+    
+    console.log('\n2. Checking instances...');
+    window.debugCommentToggle.checkInstances();
+    
+    console.log('\n3. Testing functionality...');
+    return window.debugCommentToggle.testComment(0);
+  };
 })();
