@@ -58,35 +58,48 @@
 
 
   // ---------- BOOTSTRAP & INITIALIZATION ----------
+  async function loadCodeMirrorCommentAddon() {
+    // Only load if CodeMirror is available
+    if (!window.CodeMirror) {
+      console.warn('CodeMirror not available yet, skipping comment addon');
+      return false;
+    }
+    
+    // Check if addon is already loaded
+    if (window.CodeMirror.commands && window.CodeMirror.commands.toggleComment) {
+      console.log('✅ CodeMirror comment addon already loaded');
+      return true;
+    }
+    
+    console.log('📦 Loading CodeMirror comment addon...');
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/comment/comment.min.js';
+    document.head.appendChild(script);
+    
+    await new Promise((resolve) => {
+      script.onload = () => {
+        console.log('✅ CodeMirror comment addon script loaded');
+        resolve();
+      };
+      script.onerror = () => {
+        console.warn('Failed to load CodeMirror comment addon');
+        resolve();
+      };
+    });
+    
+    // Verify addon is available
+    if (window.CodeMirror.commands && window.CodeMirror.commands.toggleComment) {
+      console.log('✅ CodeMirror comment addon ready');
+      return true;
+    }
+    
+    return false;
+  }
+  
   async function bootstrapThebe() {
     try {
       // Load CodeMirror theme CSS
       await utils.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/neo.min.css");
-      
-      // Load CodeMirror comment addon for toggle comment functionality
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/comment/comment.min.js';
-      document.head.appendChild(script);
-      await new Promise((resolve) => {
-        script.onload = resolve;
-        script.onerror = () => {
-          console.warn('Failed to load CodeMirror comment addon, comment toggling may not work');
-          resolve();
-        };
-      });
-      
-      // Ensure comment addon is fully loaded before proceeding
-      await new Promise((resolve) => {
-        const checkAddon = () => {
-          if (window.CodeMirror && window.CodeMirror.commands && window.CodeMirror.commands.toggleComment) {
-            console.log('✅ CodeMirror comment addon loaded successfully');
-            resolve();
-          } else {
-            setTimeout(checkAddon, 50);
-          }
-        };
-        checkAddon();
-      });
       
       // Set up observer to manage UI elements
       setupMutationObserver();
@@ -104,6 +117,13 @@
       
       // Store the thebe instance globally
       window.thebeInstance = thebe;
+      
+      // Now that Thebe is loaded, CodeMirror should be available
+      // Load the comment addon
+      await loadCodeMirrorCommentAddon();
+      
+      // Set up comment toggle for existing and future CodeMirror instances
+      setupCodeMirrorCommentToggle();
       
       // Mount status widget if configured
       if (thebeConfig.mountStatusWidget) {
@@ -677,9 +697,6 @@
         thebeActions.restartKernel();
       }
     });
-    
-    // Set up CodeMirror comment toggling
-    setupCodeMirrorCommentToggle();
   }
   
   function setupCodeMirrorCommentToggle() {
@@ -1060,4 +1077,27 @@
     // DOM is already loaded
     initializeThebe();
   }
+  
+  // Export test function globally for debugging
+  window.testCommentToggle = function() {
+    console.log('\ud83e\uddea Testing CodeMirror comment toggle...');
+    console.log('CodeMirror available:', !!window.CodeMirror);
+    console.log('Comment addon loaded:', !!(window.CodeMirror?.commands?.toggleComment));
+    
+    const editors = document.querySelectorAll('.CodeMirror');
+    console.log(`Found ${editors.length} CodeMirror instances`);
+    
+    editors.forEach((el, i) => {
+      if (el.CodeMirror) {
+        const extraKeys = el.CodeMirror.getOption('extraKeys');
+        console.log(`Editor ${i + 1}: Cmd-/ = ${extraKeys?.['Cmd-/']}, Ctrl-/ = ${extraKeys?.['Ctrl-/']}`);
+      }
+    });
+    
+    return {
+      codeMirror: !!window.CodeMirror,
+      addon: !!(window.CodeMirror?.commands?.toggleComment),
+      editors: editors.length
+    };
+  };
 })();

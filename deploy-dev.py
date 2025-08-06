@@ -209,7 +209,7 @@ def build_project(project_path: Path) -> None:
         sys.exit(1)
 
 
-def commit_and_push(repo_path: Path, create_tag: str | None = None) -> None:
+def commit_and_push(repo_path: Path, commit_message: str = None) -> None:
     """Commit changes and push to remote."""
     # Check if there are changes to commit
     status_result = run_command(["git", "status", "--porcelain"], cwd=repo_path, silent=True)
@@ -232,21 +232,16 @@ def commit_and_push(repo_path: Path, create_tag: str | None = None) -> None:
     print("\nStaging all changes...")
     run_command(["git", "add", "-A"], cwd=repo_path)
 
-    # Get commit message from user
-    commit_message = input("\nEnter commit message for the test repo: ").strip()
+    # Use provided commit message or generate one
     if not commit_message:
-        print("Error: Commit message cannot be empty.")
-        sys.exit(1)
+        from datetime import datetime
+        commit_message = f"Dev deployment - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    
+    print(f"Commit message: {commit_message}")
 
     # Commit changes
     print("Committing changes...")
     run_command(["git", "commit", "-m", commit_message], cwd=repo_path)
-
-    # Create and push tag if requested
-    if create_tag:
-        print(f"\n🏷️  Creating tag {create_tag}...")
-        run_command(["git", "tag", "-a", create_tag, "-m", f"Test release {create_tag}"], cwd=repo_path)
-        print(f"✅ Tag {create_tag} created")
 
     # Push to remote
     print("\n📤 Pushing to test repository...")
@@ -255,14 +250,18 @@ def commit_and_push(repo_path: Path, create_tag: str | None = None) -> None:
     branch_result = run_command(["git", "branch", "--show-current"], cwd=repo_path, silent=True)
     current_branch = branch_result.stdout.strip() or "main"
     
-    # Try regular push first, if it fails try with --set-upstream
+    # Try regular push first
     push_result = run_command(["git", "push"], cwd=repo_path, check=False, silent=True)
+    
     if push_result.returncode != 0:
         if "no upstream branch" in push_result.stderr.lower():
             print(f"Setting upstream branch and pushing...")
             push_result = run_command(["git", "push", "-u", "origin", current_branch], cwd=repo_path, check=False)
+        elif "rejected" in push_result.stderr.lower() or "fetch first" in push_result.stderr.lower():
+            print("Remote has diverged. Force pushing...")
+            push_result = run_command(["git", "push", "-f", "origin", current_branch], cwd=repo_path, check=False)
         else:
-            # Show the error if it's not an upstream issue
+            # Show the error if it's not an expected issue
             push_result = run_command(["git", "push"], cwd=repo_path, check=False)
     
     if push_result.returncode != 0:
@@ -274,15 +273,6 @@ def commit_and_push(repo_path: Path, create_tag: str | None = None) -> None:
             sys.exit(1)
     else:
         print("✅ Successfully pushed to test repository!")
-        
-        # Push tag if created
-        if create_tag:
-            print(f"Pushing tag {create_tag}...")
-            tag_push_result = run_command(["git", "push", "origin", create_tag], cwd=repo_path, check=False)
-            if tag_push_result.returncode != 0:
-                print(f"⚠️  Tag push failed: {tag_push_result.stderr}")
-            else:
-                print(f"✅ Tag {create_tag} pushed")
 
 
 def main():
@@ -309,35 +299,18 @@ def main():
     export_ref = "HEAD"
 
     if uncommitted:
-        print("\n⚠️  Warning: Uncommitted files detected (excluding ./docs):")
+        print("\n⚠️  Uncommitted files detected (excluding ./docs):")
         for file in uncommitted[:5]:
             print(f"  - {file}")
         if len(uncommitted) > 5:
             print(f"  ... and {len(uncommitted) - 5} more")
-
-        print("\nOptions:")
-        print("  1. Continue with HEAD (includes uncommitted changes)")
-        print("  2. Use latest tag" + (f" ({latest_tag})" if latest_tag else " (no tags available)"))
-        print("  3. Cancel deployment")
-
-        choice = input("\nChoose option (1/2/3): ").strip()
-        if choice == "2" and latest_tag:
-            export_ref = latest_tag
-            print(f"Using tag {latest_tag} for export")
-        elif choice == "3":
-            print("Deployment cancelled.")
-            sys.exit(0)
-        else:
-            print("Using HEAD (includes uncommitted changes)")
+        print("Using HEAD (includes uncommitted changes)")
 
     # Build check in source repo
     if not build_project_check(source_path):
-        response = input("\n⚠️  Build failed. Continue anyway? (yes/no): ").strip().lower()
-        if response not in ["yes", "y"]:
-            print("Deployment cancelled.")
-            sys.exit(1)
+        print("\n⚠️  Build check failed, but continuing with deployment...")
 
-    # Confirm deployment
+    # Show deployment summary
     print("\n📋 Development Deployment Summary:")
     print(f"  Export from: {export_ref}")
     print(f"  Target path: {target_path}")
@@ -345,12 +318,8 @@ def main():
     print("  Actions:")
     print("    1. Export repository using gitattributes")
     print("    2. Build project in target directory")
-    print("    3. Commit and push to test repository")
-
-    confirm = input("\nProceed with deployment? (yes/no): ").strip().lower()
-    if confirm not in ["yes", "y"]:
-        print("Deployment cancelled.")
-        sys.exit(0)
+    print("    3. Commit and force push to test repository")
+    print("\n🚀 Starting deployment...")
 
     # Export repository
     export_repository(source_path, target_path, export_ref)
@@ -358,16 +327,12 @@ def main():
     # Build the project
     build_project(target_path)
 
-    # Ask about creating a tag
-    create_tag = None
-    tag_response = input("\n🏷️  Create a tag for this test release? (yes/no): ").strip().lower()
-    if tag_response in ["yes", "y"]:
-        tag_name = input("Enter tag name (e.g., v1.0.0-dev): ").strip()
-        if tag_name:
-            create_tag = tag_name
-
-    # Commit and push
-    commit_and_push(target_path, create_tag)
+    # Commit and push (with optional custom message from command line)
+    import sys
+    commit_msg = None
+    if len(sys.argv) > 1:
+        commit_msg = ' '.join(sys.argv[1:])
+    commit_and_push(target_path, commit_msg)
 
     print("\n✅ Development deployment completed!")
     print(f"📁 Test repository at: {target_path}")
