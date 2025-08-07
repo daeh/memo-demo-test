@@ -58,165 +58,196 @@
 
 
   // ---------- BOOTSTRAP & INITIALIZATION ----------
-  async function waitForCodeMirror(maxAttempts = 100, interval = 200) {
-    console.log('⏳ Waiting for CodeMirror to be available...');
+  // Simplified DOM-based CodeMirror detection
+  function extractCodeMirrorFromDOM() {
+    console.log('🔍 Extracting CodeMirror from DOM...');
     
-    for (let i = 0; i < maxAttempts; i++) {
-      // Check multiple ways CodeMirror might be available
-      if (window.CodeMirror) {
-        console.log('✅ CodeMirror is now available (global)');
-        return true;
+    const cmElements = document.querySelectorAll('.CodeMirror');
+    
+    for (const element of cmElements) {
+      if (element.CodeMirror?.constructor) {
+        console.log('✅ CodeMirror constructor found in DOM element');
+        
+        // Extract the constructor
+        const CM = element.CodeMirror.constructor;
+        
+        // Make it globally available
+        window.CodeMirror = CM;
+        
+        // Initialize commands object
+        window.CodeMirror.commands = window.CodeMirror.commands || {};
+        
+        return CM;
       }
-      
-      // Check if Thebe has CodeMirror
-      if (window.thebe && window.thebe.CodeMirror) {
-        console.log('✅ CodeMirror found via thebe.CodeMirror');
-        window.CodeMirror = window.thebe.CodeMirror;
-        return true;
-      }
-      
-      // Check if any CodeMirror instances exist in DOM
-      const cmElements = document.querySelectorAll('.CodeMirror');
-      if (cmElements.length > 0) {
-        for (const element of cmElements) {
-          if (element.CodeMirror && element.CodeMirror.constructor) {
-            console.log('✅ CodeMirror found via DOM element');
-            // Get the CodeMirror constructor from the instance
-            const CM = element.CodeMirror.constructor;
-            // Check if it has the prototype we need
-            if (CM.prototype && !window.CodeMirror) {
-              window.CodeMirror = CM;
-              // Also need to copy over any static methods/properties
-              if (element.CodeMirror.commands) {
-                window.CodeMirror.commands = element.CodeMirror.commands;
-              }
-            }
-            return true;
-          }
-        }
-      }
-      
-      if (i % 10 === 0 && i > 0) {
-        console.log(`⏳ Still waiting for CodeMirror... (attempt ${i}/${maxAttempts})`);
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, interval));
     }
     
-    console.warn('⚠️ Timeout waiting for CodeMirror after ' + (maxAttempts * interval / 1000) + ' seconds');
-    return false;
+    return null;
   }
   
-  async function loadCodeMirrorCommentAddon() {
-    // Wait for CodeMirror to be available
-    const cmAvailable = await waitForCodeMirror();
-    if (!cmAvailable) {
-      console.error('❌ Cannot load comment addon - CodeMirror not available');
-      return false;
-    }
+  function waitForCodeMirrorDOM(maxAttempts = 30, interval = 500) {
+    console.log('⏳ Waiting for CodeMirror instances in DOM...');
     
-    // Check if addon is already loaded
-    if (window.CodeMirror && window.CodeMirror.commands && window.CodeMirror.commands.toggleComment) {
-      console.log('✅ CodeMirror comment addon already loaded');
-      return true;
-    }
-    
-    // Check if we need to initialize commands object
-    if (window.CodeMirror && !window.CodeMirror.commands) {
-      console.log('📦 Initializing CodeMirror.commands object');
-      window.CodeMirror.commands = {};
-    }
-    
-    console.log('📦 Loading CodeMirror comment addon from CDN...');
-    
-    // Try to load the addon script
     return new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/comment/comment.min.js';
+      let attempts = 0;
       
-      script.onload = () => {
-        console.log('✅ CodeMirror comment addon script loaded from CDN');
+      const checkForCodeMirror = () => {
+        attempts++;
         
-        // Verify addon is available
-        if (window.CodeMirror && window.CodeMirror.commands && window.CodeMirror.commands.toggleComment) {
-          console.log('✅ CodeMirror comment addon ready and verified');
+        const CM = extractCodeMirrorFromDOM();
+        if (CM) {
+          console.log(`✅ CodeMirror found after ${attempts} attempts`);
           resolve(true);
-        } else {
-          console.warn('⚠️ Comment addon script loaded but toggleComment not available');
-          // Try manual implementation as fallback
-          implementManualCommentToggle();
-          resolve(true);
+          return;
         }
+        
+        if (attempts >= maxAttempts) {
+          console.warn('⚠️ CodeMirror not found in DOM after timeout');
+          resolve(false);
+          return;
+        }
+        
+        setTimeout(checkForCodeMirror, interval);
       };
       
-      script.onerror = (error) => {
-        console.error('❌ Failed to load CodeMirror comment addon from CDN:', error);
-        // Try manual implementation as fallback
-        implementManualCommentToggle();
-        resolve(true); // Still resolve true since we have a fallback
-      };
-      
-      document.head.appendChild(script);
+      checkForCodeMirror();
     });
   }
   
-  // Manual implementation of comment toggle as fallback
-  function implementManualCommentToggle() {
-    console.log('🔧 Implementing manual comment toggle as fallback...');
+  // Self-contained comment toggle implementation
+  function createCommentToggleCommand() {
+    console.log('🔧 Creating self-contained comment toggle command...');
     
-    if (!window.CodeMirror) {
-      console.error('❌ Cannot implement manual toggle - CodeMirror not available');
-      return;
-    }
-    
-    if (!window.CodeMirror.commands) {
-      window.CodeMirror.commands = {};
-    }
-    
-    window.CodeMirror.commands.toggleComment = function(cm) {
-      const selections = cm.listSelections();
+    return function toggleComment(cm) {
       const mode = cm.getMode();
-      const commentString = mode.lineComment || (mode.name === 'python' ? '#' : '//');
+      const commentString = getCommentString(mode);
       
       cm.operation(() => {
-        for (const sel of selections) {
-          const from = sel.from();
-          const to = sel.to();
-          
-          // Get all lines in selection
-          const startLine = from.line;
-          const endLine = to.line;
-          
-          // Check if all non-empty lines are commented
-          let allCommented = true;
-          for (let i = startLine; i <= endLine; i++) {
-            const line = cm.getLine(i);
-            if (line.trim() && !line.trim().startsWith(commentString)) {
-              allCommented = false;
-              break;
-            }
-          }
-          
-          // Toggle comments
-          for (let i = startLine; i <= endLine; i++) {
-            const line = cm.getLine(i);
-            if (allCommented) {
-              // Remove comment
-              const regex = new RegExp('^(\\s*)' + commentString.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s?');
-              const newLine = line.replace(regex, '$1');
-              cm.replaceRange(newLine, {line: i, ch: 0}, {line: i, ch: line.length});
-            } else if (line.trim()) {
-              // Add comment
-              const leadingWhitespace = line.match(/^\s*/)[0];
-              const newLine = leadingWhitespace + commentString + ' ' + line.trim();
-              cm.replaceRange(newLine, {line: i, ch: 0}, {line: i, ch: line.length});
-            }
-          }
+        const selections = cm.listSelections();
+        
+        for (const selection of selections) {
+          toggleCommentForSelection(cm, selection, commentString);
         }
       });
     };
+  }
+  
+  function getCommentString(mode) {
+    // Support multiple languages with appropriate comment syntax
+    const modeMap = {
+      'python': '#',
+      'javascript': '//',
+      'typescript': '//',
+      'jsx': '//',
+      'tsx': '//',
+      'java': '//',
+      'c': '//',
+      'cpp': '//',
+      'csharp': '//',
+      'ruby': '#',
+      'shell': '#',
+      'bash': '#',
+      'yaml': '#',
+      'r': '#',
+      'julia': '#',
+      'sql': '--',
+      'lua': '--',
+      'haskell': '--',
+      'rust': '//',
+      'go': '//',
+      'swift': '//',
+      'kotlin': '//',
+      'scala': '//',
+      'php': '//',
+      'perl': '#',
+      'html': '<!--',
+      'xml': '<!--',
+      'css': '/*',
+      'scss': '//',
+      'less': '//',
+      'markdown': '<!--'
+    };
     
-    console.log('✅ Manual comment toggle implemented');
+    const modeName = mode.name?.toLowerCase() || '';
+    return modeMap[modeName] || '#';  // Default to Python
+  }
+  
+  function toggleCommentForSelection(cm, selection, commentString) {
+    const from = selection.from();
+    const to = selection.to();
+    
+    // Handle single cursor (no selection)
+    if (from.line === to.line && from.ch === to.ch) {
+      toggleCommentForLine(cm, from.line, commentString);
+      return;
+    }
+    
+    // Handle multi-line selection
+    const startLine = from.line;
+    const endLine = to.line;
+    
+    // Determine if we should comment or uncomment
+    const shouldComment = shouldCommentRange(cm, startLine, endLine, commentString);
+    
+    // Apply to all lines in selection
+    for (let line = startLine; line <= endLine; line++) {
+      if (shouldComment) {
+        addCommentToLine(cm, line, commentString);
+      } else {
+        removeCommentFromLine(cm, line, commentString);
+      }
+    }
+  }
+  
+  function shouldCommentRange(cm, startLine, endLine, commentString) {
+    for (let line = startLine; line <= endLine; line++) {
+      const text = cm.getLine(line);
+      if (text.trim() && !isCommented(text, commentString)) {
+        return true;  // Found uncommented line, so comment all
+      }
+    }
+    return false;  // All lines commented, so uncomment all
+  }
+  
+  function toggleCommentForLine(cm, lineNum, commentString) {
+    const text = cm.getLine(lineNum);
+    
+    if (isCommented(text, commentString)) {
+      removeCommentFromLine(cm, lineNum, commentString);
+    } else if (text.trim()) {
+      addCommentToLine(cm, lineNum, commentString);
+    }
+  }
+  
+  function isCommented(text, commentString) {
+    return text.trim().startsWith(commentString);
+  }
+  
+  function addCommentToLine(cm, lineNum, commentString) {
+    const text = cm.getLine(lineNum);
+    if (!text.trim()) return;  // Skip empty lines
+    
+    const indent = text.match(/^\s*/)[0];
+    const content = text.slice(indent.length);
+    const newText = indent + commentString + ' ' + content;
+    
+    cm.replaceRange(newText, 
+      {line: lineNum, ch: 0}, 
+      {line: lineNum, ch: text.length}
+    );
+  }
+  
+  function removeCommentFromLine(cm, lineNum, commentString) {
+    const text = cm.getLine(lineNum);
+    const escapedComment = commentString.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`^(\\s*)${escapedComment}\\s?`);
+    const newText = text.replace(regex, '$1');
+    
+    if (newText !== text) {
+      cm.replaceRange(newText,
+        {line: lineNum, ch: 0},
+        {line: lineNum, ch: text.length}
+      );
+    }
   }
   
   async function bootstrapThebe() {
@@ -241,46 +272,10 @@
       // Store the thebe instance globally
       window.thebeInstance = thebe;
       
-      // Start the comment addon loading process
-      // Try immediately and also set up retry mechanism
-      setTimeout(async () => {
-        console.log('🔄 Attempting to load CodeMirror comment addon...');
-        const success = await loadCodeMirrorCommentAddon();
-        if (success) {
-          console.log('🎯 Setting up comment toggle for CodeMirror instances...');
-          setupCodeMirrorCommentToggle();
-        } else {
-          console.log('⏳ Will retry comment addon loading when CodeMirror becomes available...');
-        }
-      }, 1000); // Small delay to let Thebe initialize
-      
-      // Also set up a watcher for CodeMirror instances
-      let addonLoaded = false;
-      const checkForCodeMirror = setInterval(async () => {
-        if (!addonLoaded) {
-          const cmElements = document.querySelectorAll('.CodeMirror');
-          if (cmElements.length > 0 && !window.CodeMirror) {
-            console.log('🔍 CodeMirror instances detected, attempting to set up comment toggle...');
-            const success = await loadCodeMirrorCommentAddon();
-            if (success) {
-              addonLoaded = true;
-              setupCodeMirrorCommentToggle();
-              clearInterval(checkForCodeMirror);
-            }
-          } else if (window.CodeMirror && !addonLoaded) {
-            console.log('🔍 CodeMirror global detected, loading addon...');
-            const success = await loadCodeMirrorCommentAddon();
-            if (success) {
-              addonLoaded = true;
-              setupCodeMirrorCommentToggle();
-              clearInterval(checkForCodeMirror);
-            }
-          }
-        }
-      }, 2000);
-      
-      // Clear the interval after 60 seconds to prevent memory leak
-      setTimeout(() => clearInterval(checkForCodeMirror), 60000);
+      // Start comment toggle system immediately after bootstrap
+      console.log('🔧 Initializing comment toggle system...');
+      const observer = setupCodeMirrorCommentToggle();
+      window.commentToggleObserver = observer;
       
       // Mount status widget if configured
       if (thebeConfig.mountStatusWidget) {
@@ -856,129 +851,118 @@
     });
   }
   
+  // Streamlined MutationObserver with immediate action
   function setupCodeMirrorCommentToggle() {
-    console.log('🔧 Setting up CodeMirror comment toggle...');
+    console.log('🚀 Setting up CodeMirror comment toggle system...');
     
-    // Configure all existing instances immediately
+    // First, try to configure any existing instances
     configureAllCodeMirrorInstances();
     
-    // Also set up observer for future CodeMirror instances
+    // Set up observer for new instances
     const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
           if (node.nodeType === Node.ELEMENT_NODE) {
-            // Check if this is or contains a CodeMirror element
+            // Check if this node is a CodeMirror element
             if (node.classList?.contains('CodeMirror')) {
-              // Small delay to ensure the instance is fully initialized
-              setTimeout(() => configureCodeMirrorInstance(node), 100);
-            } else if (node.querySelectorAll) {
+              handleNewCodeMirrorInstance(node);
+            }
+            
+            // Check for CodeMirror elements within this node
+            if (node.querySelectorAll) {
               const editors = node.querySelectorAll('.CodeMirror');
-              editors.forEach(editor => {
-                setTimeout(() => configureCodeMirrorInstance(editor), 100);
-              });
+              editors.forEach(handleNewCodeMirrorInstance);
             }
           }
-        });
-      });
+        }
+      }
     });
     
+    // Start observing immediately
     observer.observe(document.body, {
       childList: true,
       subtree: true
     });
     
-    // Also configure after a delay to catch any editors that were created during initialization
+    console.log('✅ MutationObserver active for CodeMirror detection');
+    return observer;
+  }
+  
+  function handleNewCodeMirrorInstance(element) {
+    console.log('🔍 New CodeMirror instance detected');
+    
+    // Small delay to ensure CodeMirror is fully initialized
     setTimeout(() => {
-      configureAllCodeMirrorInstances();
-    }, 2000);
+      configureCodeMirrorInstance(element);
+    }, 100);
   }
   
   function configureAllCodeMirrorInstances() {
-    document.querySelectorAll('.CodeMirror').forEach(configureCodeMirrorInstance);
+    console.log('🔧 Configuring all existing CodeMirror instances...');
+    const editors = document.querySelectorAll('.CodeMirror');
+    
+    let successCount = 0;
+    editors.forEach((element, index) => {
+      const success = configureCodeMirrorInstance(element);
+      if (success) successCount++;
+    });
+    
+    console.log(`✅ Successfully configured ${successCount}/${editors.length} instances`);
+    return { total: editors.length, configured: successCount };
   }
   
+  // Configure instance with direct function binding
   function configureCodeMirrorInstance(element) {
-    if (element.CodeMirror && !element.dataset.commentToggleConfigured) {
-      const cm = element.CodeMirror;
+    console.log('🔧 Configuring CodeMirror instance for comment toggle...');
+    
+    if (!element.CodeMirror) {
+      console.warn('⚠️ Element does not have CodeMirror instance');
+      return false;
+    }
+    
+    if (element.dataset.commentToggleConfigured === 'true') {
+      console.log('ℹ️ Instance already configured for comment toggle');
+      return true;
+    }
+    
+    const cm = element.CodeMirror;
+    
+    // Ensure CodeMirror constructor is available globally
+    if (!window.CodeMirror) {
+      window.CodeMirror = cm.constructor;
+      window.CodeMirror.commands = window.CodeMirror.commands || {};
+    }
+    
+    // Create the comment toggle command if it doesn't exist
+    if (!window.CodeMirror.commands.toggleComment) {
+      window.CodeMirror.commands.toggleComment = createCommentToggleCommand();
+      console.log('✅ Comment toggle command created');
+    }
+    
+    try {
+      // Get current extraKeys and preserve them
+      const currentExtraKeys = cm.getOption('extraKeys') || {};
       
-      try {
-        // Get current extraKeys and preserve existing shortcuts
-        const currentExtraKeys = cm.getOption('extraKeys') || {};
-        
-        // Check if comment addon is available
-        if (window.CodeMirror && window.CodeMirror.commands && window.CodeMirror.commands.toggleComment) {
-          // Use the addon's toggleComment
-          cm.setOption('extraKeys', {
-            ...currentExtraKeys,
-            'Cmd-/': 'toggleComment',
-            'Ctrl-/': 'toggleComment'
-          });
-          console.log('✅ Comment toggle configured using addon');
-        } else {
-          console.warn('⚠️ Comment addon not available, using direct function binding');
-          
-          // First ensure we have the manual implementation
-          if (!window.CodeMirror) {
-            // Try to get CodeMirror from the instance
-            window.CodeMirror = cm.constructor;
-          }
-          
-          // Implement manual toggle if needed
-          if (!window.CodeMirror.commands || !window.CodeMirror.commands.toggleComment) {
-            implementManualCommentToggle();
-          }
-          
-          // Bind the function directly to the keys
-          const toggleFn = function(cm) {
-            if (window.CodeMirror && window.CodeMirror.commands && window.CodeMirror.commands.toggleComment) {
-              window.CodeMirror.commands.toggleComment(cm);
-            } else {
-              // Inline implementation as last resort
-              const sel = cm.getSelection() || cm.getLine(cm.getCursor().line);
-              const mode = cm.getMode();
-              const commentString = mode.lineComment || (mode.name === 'python' ? '# ' : '// ');
-              
-              if (sel) {
-                // Toggle selection
-                const isCommented = sel.startsWith(commentString);
-                const newText = isCommented ? 
-                  sel.replace(new RegExp('^' + commentString.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), '') : 
-                  commentString + sel;
-                cm.replaceSelection(newText);
-              } else {
-                // Toggle current line
-                const cursor = cm.getCursor();
-                const line = cm.getLine(cursor.line);
-                const isCommented = line.trim().startsWith(commentString.trim());
-                const newLine = isCommented ?
-                  line.replace(new RegExp('^(\\s*)' + commentString.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s?'), '$1') :
-                  line.replace(/^(\s*)/, '$1' + commentString);
-                cm.replaceRange(newLine, {line: cursor.line, ch: 0}, {line: cursor.line, ch: line.length});
-              }
-            }
-          };
-          
-          // Set the function directly
-          cm.setOption('extraKeys', {
-            ...currentExtraKeys,
-            'Cmd-/': toggleFn,
-            'Ctrl-/': toggleFn
-          });
-          console.log('✅ Comment toggle configured using direct function');
-        }
-        
-        element.dataset.commentToggleConfigured = 'true';
-        
-        // Verify configuration was applied
-        const verifyKeys = cm.getOption('extraKeys') || {};
-        if (verifyKeys['Cmd-/'] && verifyKeys['Ctrl-/']) {
-          console.log('✅ Comment toggle shortcuts verified for instance');
-        } else {
-          console.error('❌ Failed to configure comment toggle - extraKeys not set properly');
-        }
-      } catch (error) {
-        console.error('❌ Error configuring CodeMirror instance:', error);
-      }
+      // Create the toggle function for this specific instance
+      const toggleFn = function(cm) {
+        window.CodeMirror.commands.toggleComment(cm);
+      };
+      
+      // Add comment shortcuts with direct function binding
+      const newExtraKeys = {
+        ...currentExtraKeys,
+        'Cmd-/': toggleFn,      // Direct function reference
+        'Ctrl-/': toggleFn      // Direct function reference
+      };
+      
+      cm.setOption('extraKeys', newExtraKeys);
+      element.dataset.commentToggleConfigured = 'true';
+      
+      console.log('✅ Comment toggle configured successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Error configuring CodeMirror instance:', error);
+      return false;
     }
   }
 
@@ -1293,27 +1277,56 @@
     initializeThebe();
   }
   
-  // Export test function globally for debugging
+  // Simplified test function
   window.testCommentToggle = function() {
-    console.log('\ud83e\uddea Testing CodeMirror comment toggle...');
-    console.log('CodeMirror available:', !!window.CodeMirror);
-    console.log('Comment addon loaded:', !!(window.CodeMirror?.commands?.toggleComment));
+    console.log('🧪 Quick Comment Toggle Test...');
     
-    const editors = document.querySelectorAll('.CodeMirror');
-    console.log(`Found ${editors.length} CodeMirror instances`);
-    
-    editors.forEach((el, i) => {
-      if (el.CodeMirror) {
-        const extraKeys = el.CodeMirror.getOption('extraKeys');
-        console.log(`Editor ${i + 1}: Cmd-/ = ${extraKeys?.['Cmd-/']}, Ctrl-/ = ${extraKeys?.['Ctrl-/']}`);
-      }
-    });
-    
-    return {
-      codeMirror: !!window.CodeMirror,
-      addon: !!(window.CodeMirror?.commands?.toggleComment),
-      editors: editors.length
+    const results = {
+      codeMirrorAvailable: !!window.CodeMirror,
+      toggleCommandExists: !!(window.CodeMirror?.commands?.toggleComment),
+      instanceCount: document.querySelectorAll('.CodeMirror').length,
+      configuredCount: document.querySelectorAll('.CodeMirror[data-comment-toggle-configured="true"]').length
     };
+    
+    console.log('📊 Environment Status:', results);
+    
+    // Test functionality if possible
+    const editor = document.querySelector('.CodeMirror');
+    if (editor?.CodeMirror) {
+      const cm = editor.CodeMirror;
+      const originalValue = cm.getValue();
+      
+      try {
+        // Test with simple content
+        cm.setValue('test line');
+        cm.setCursor(0, 0);
+        
+        // Try toggle
+        if (window.CodeMirror.commands.toggleComment) {
+          window.CodeMirror.commands.toggleComment(cm);
+          const afterComment = cm.getValue();
+          
+          window.CodeMirror.commands.toggleComment(cm);
+          const afterUncomment = cm.getValue();
+          
+          const success = afterComment.includes('#') && afterUncomment === 'test line';
+          console.log(success ? '✅ Functional test PASSED' : '❌ Functional test FAILED');
+          results.functionalTest = success;
+        } else {
+          console.log('❌ No toggle command available');
+          results.functionalTest = false;
+        }
+        
+        // Restore original content
+        cm.setValue(originalValue);
+      } catch (error) {
+        console.error('❌ Test error:', error);
+        cm.setValue(originalValue);
+        results.functionalTest = false;
+      }
+    }
+    
+    return results;
   };
 
   // Enhanced debugging utilities
@@ -1710,60 +1723,33 @@
     return window.debugCommentToggle.testComment(0);
   };
   
-  // Emergency fix function for users
-  window.fixCommentToggle = async function() {
-    console.log('🔧 Running emergency comment toggle fix...');
+  // Emergency fix function for console use
+  window.fixCommentToggle = function() {
+    console.log('🔧 Applying emergency comment toggle fix...');
     
-    // Step 1: Ensure CodeMirror is available globally
-    const cmElements = document.querySelectorAll('.CodeMirror');
-    if (cmElements.length === 0) {
-      console.error('❌ No CodeMirror editors found. Please run a code cell first.');
-      return false;
-    }
-    
-    if (cmElements[0].CodeMirror && !window.CodeMirror) {
-      window.CodeMirror = cmElements[0].CodeMirror.constructor;
-      console.log('✅ Made CodeMirror global');
-    }
-    
-    // Step 2: Load or implement comment toggle
-    if (!window.CodeMirror?.commands?.toggleComment) {
-      console.log('📦 Implementing comment toggle...');
-      implementManualCommentToggle();
-    }
-    
-    // Step 3: Configure all instances
-    let configured = 0;
-    cmElements.forEach((el) => {
-      if (el.CodeMirror) {
-        const cm = el.CodeMirror;
-        const extraKeys = cm.getOption('extraKeys') || {};
-        
-        // Create a toggle function
-        const toggleFn = function(cm) {
-          if (window.CodeMirror?.commands?.toggleComment) {
-            window.CodeMirror.commands.toggleComment(cm);
-          } else {
-            console.error('Toggle function not available');
-          }
-        };
-        
-        cm.setOption('extraKeys', {
-          ...extraKeys,
-          'Cmd-/': toggleFn,
-          'Ctrl-/': toggleFn
-        });
-        
-        el.dataset.commentToggleConfigured = 'true';
-        configured++;
+    // Extract CodeMirror from DOM if needed
+    if (!window.CodeMirror) {
+      const cmElement = document.querySelector('.CodeMirror');
+      if (cmElement?.CodeMirror) {
+        window.CodeMirror = cmElement.CodeMirror.constructor;
+        window.CodeMirror.commands = window.CodeMirror.commands || {};
+        console.log('✅ CodeMirror extracted from DOM');
+      } else {
+        console.error('❌ No CodeMirror instances found');
+        return false;
       }
-    });
+    }
     
-    console.log(`✅ Fixed ${configured} editor(s)`);
-    console.log('🎉 Comment toggle should now work! Try cmd-/ or Ctrl-/');
+    // Create command if missing
+    if (!window.CodeMirror.commands.toggleComment) {
+      window.CodeMirror.commands.toggleComment = createCommentToggleCommand();
+      console.log('✅ Comment toggle command created');
+    }
     
-    // Test it
-    console.log('\n🧪 Testing the fix...');
-    return window.debugCommentToggle.testComment(0);
+    // Configure all instances
+    const result = configureAllCodeMirrorInstances();
+    console.log(`✅ Fix applied to ${result.configured}/${result.total} instances`);
+    
+    return result;
   };
 })();
