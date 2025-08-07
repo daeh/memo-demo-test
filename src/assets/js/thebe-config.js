@@ -123,9 +123,18 @@
       
       cm.operation(() => {
         const selections = cm.listSelections();
+        const newSelections = [];
         
         for (const selection of selections) {
-          toggleCommentForSelection(cm, selection, commentString);
+          const newSelection = toggleCommentForSelection(cm, selection, commentString);
+          if (newSelection) {
+            newSelections.push(newSelection);
+          }
+        }
+        
+        // Restore selections with proper positioning
+        if (newSelections.length > 0) {
+          cm.setSelections(newSelections);
         }
       });
     };
@@ -174,11 +183,13 @@
   function toggleCommentForSelection(cm, selection, commentString) {
     const from = selection.from();
     const to = selection.to();
+    const anchor = selection.anchor;
+    const head = selection.head;
     
     // Handle single cursor (no selection)
     if (from.line === to.line && from.ch === to.ch) {
-      toggleCommentForLine(cm, from.line, commentString);
-      return;
+      const newCursor = toggleCommentForLine(cm, from.line, from.ch, commentString);
+      return { anchor: newCursor, head: newCursor };
     }
     
     // Handle multi-line selection
@@ -188,14 +199,34 @@
     // Determine if we should comment or uncomment
     const shouldComment = shouldCommentRange(cm, startLine, endLine, commentString);
     
+    // Track position changes for each line
+    const lineDeltas = {};
+    
     // Apply to all lines in selection
     for (let line = startLine; line <= endLine; line++) {
+      let charsDelta = 0;
+      
       if (shouldComment) {
-        addCommentToLine(cm, line, commentString);
+        charsDelta = addCommentToLine(cm, line, commentString);
       } else {
-        removeCommentFromLine(cm, line, commentString);
+        charsDelta = removeCommentFromLine(cm, line, commentString);
       }
+      
+      lineDeltas[line] = charsDelta;
     }
+    
+    // Calculate new anchor and head positions
+    const newAnchor = {
+      line: anchor.line,
+      ch: Math.max(0, anchor.ch + (lineDeltas[anchor.line] || 0))
+    };
+    
+    const newHead = {
+      line: head.line,
+      ch: Math.max(0, head.ch + (lineDeltas[head.line] || 0))
+    };
+    
+    return { anchor: newAnchor, head: newHead };
   }
   
   function shouldCommentRange(cm, startLine, endLine, commentString) {
@@ -208,14 +239,19 @@
     return false;  // All lines commented, so uncomment all
   }
   
-  function toggleCommentForLine(cm, lineNum, commentString) {
+  function toggleCommentForLine(cm, lineNum, cursorCh, commentString) {
     const text = cm.getLine(lineNum);
+    let charsDelta = 0;
     
     if (isCommented(text, commentString)) {
-      removeCommentFromLine(cm, lineNum, commentString);
+      charsDelta = removeCommentFromLine(cm, lineNum, commentString);
     } else if (text.trim()) {
-      addCommentToLine(cm, lineNum, commentString);
+      charsDelta = addCommentToLine(cm, lineNum, commentString);
     }
+    
+    // Calculate new cursor position
+    const newCursorCh = Math.max(0, cursorCh + charsDelta);
+    return { line: lineNum, ch: newCursorCh };
   }
   
   function isCommented(text, commentString) {
@@ -224,16 +260,20 @@
   
   function addCommentToLine(cm, lineNum, commentString) {
     const text = cm.getLine(lineNum);
-    if (!text.trim()) return;  // Skip empty lines
+    if (!text.trim()) return 0;  // Skip empty lines, no character change
     
     const indent = text.match(/^\s*/)[0];
     const content = text.slice(indent.length);
-    const newText = indent + commentString + ' ' + content;
+    const commentWithSpace = commentString + ' ';
+    const newText = indent + commentWithSpace + content;
     
     cm.replaceRange(newText, 
       {line: lineNum, ch: 0}, 
       {line: lineNum, ch: text.length}
     );
+    
+    // Return the number of characters added
+    return commentWithSpace.length;
   }
   
   function removeCommentFromLine(cm, lineNum, commentString) {
@@ -247,7 +287,13 @@
         {line: lineNum, ch: 0},
         {line: lineNum, ch: text.length}
       );
+      
+      // Calculate how many characters were removed
+      const charsRemoved = text.length - newText.length;
+      return -charsRemoved;  // Return negative for removed characters
     }
+    
+    return 0;  // No change
   }
   
   async function bootstrapThebe() {
